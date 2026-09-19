@@ -210,6 +210,7 @@ T = {
             "mywatch": "📋 My watchlist",
             "help": "❓ Help"
         },
+        "menu_back": "🏠 Main menu",
         "ask_target": "Send me the number, Till, or business name:",
         "ask_watch": "Send me the number you want to watch:",
         "checking": "🔍 Checking...",
@@ -242,6 +243,7 @@ T = {
             "mywatch": "📋 Orodha yangu",
             "help": "❓ Msaada"
         },
+        "menu_back": "🏠 Menyu kuu",
         "ask_target": "Nitume namba, Till, au jina la biashara:",
         "ask_watch": "Nitume namba unayotaka kufuatilia:",
         "checking": "🔍 Inakagua...",
@@ -281,9 +283,15 @@ def get_menu_keyboard(lang):
         [InlineKeyboardButton(b['help'], callback_data="menu_help")]
     ])
 
+def get_back_keyboard(lang):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(T[lang]['menu_back'], callback_data="menu_back")]
+    ])
+
 def get_verdict_keyboard(lang, target):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚠️ Report this", callback_data=f"report_{target}")]
+        [InlineKeyboardButton("⚠️ Report this", callback_data=f"report_{target}")],
+        [InlineKeyboardButton(T[lang]['menu_back'], callback_data="menu_back")]
     ])
 
 # ========== ОБРАБОТЧИКИ ==========
@@ -298,7 +306,7 @@ async def help_command(update, context):
     user_id = update.effective_user.id
     register_user(user_id)
     lang = get_lang(user_id)
-    await update.message.reply_text(T[lang]['help'], parse_mode="Markdown")
+    await update.message.reply_text(T[lang]['help'], parse_mode="Markdown", reply_markup=get_back_keyboard(lang))
 
 async def stats_command(update, context):
     users, checks, signals = get_stats()
@@ -325,9 +333,9 @@ async def watch_command(update, context):
         return
     target = context.args[0].strip()
     if add_to_watchlist(user_id, target):
-        await update.message.reply_text(T[lang]['watch_added'].format(target=target))
+        await update.message.reply_text(T[lang]['watch_added'].format(target=target), reply_markup=get_back_keyboard(lang))
     else:
-        await update.message.reply_text(T[lang]['watch_exists'].format(target=target))
+        await update.message.reply_text(T[lang]['watch_exists'].format(target=target), reply_markup=get_back_keyboard(lang))
 
 async def mywatch_command(update, context):
     user_id = update.effective_user.id
@@ -335,10 +343,10 @@ async def mywatch_command(update, context):
     lang = get_lang(user_id)
     items = get_watchlist(user_id)
     if not items:
-        await update.message.reply_text(T[lang]['watch_empty'])
+        await update.message.reply_text(T[lang]['watch_empty'], reply_markup=get_back_keyboard(lang))
         return
     text_items = "\n".join(f"• `{item}`" for item in items)
-    await update.message.reply_text(T[lang]['watch_list'].format(items=text_items), parse_mode="Markdown")
+    await update.message.reply_text(T[lang]['watch_list'].format(items=text_items), parse_mode="Markdown", reply_markup=get_back_keyboard(lang))
 
 async def unwatch_command(update, context):
     user_id = update.effective_user.id
@@ -349,7 +357,7 @@ async def unwatch_command(update, context):
         return
     target = context.args[0].strip()
     remove_from_watchlist(user_id, target)
-    await update.message.reply_text(T[lang]['watch_removed'].format(target=target))
+    await update.message.reply_text(T[lang]['watch_removed'].format(target=target), reply_markup=get_back_keyboard(lang))
 
 async def handle_message(update, context):
     user_id = update.effective_user.id
@@ -361,7 +369,7 @@ async def handle_message(update, context):
     if "|" in text and len(text.split("|")) == 2:
         parts = text.split("|")
         add_signal(parts[0].strip(), detect_target_type(parts[0].strip()), "medium", parts[1].strip(), "user", user_id)
-        await update.message.reply_text(T[lang]['report_saved'])
+        await update.message.reply_text(T[lang]['report_saved'], reply_markup=get_back_keyboard(lang))
         return
     
     if state == "waiting_for_check":
@@ -379,9 +387,9 @@ async def handle_message(update, context):
     
     if state == "waiting_for_watch":
         if add_to_watchlist(user_id, text):
-            await update.message.reply_text(T[lang]['watch_added'].format(target=text))
+            await update.message.reply_text(T[lang]['watch_added'].format(target=text), reply_markup=get_back_keyboard(lang))
         else:
-            await update.message.reply_text(T[lang]['watch_exists'].format(target=text))
+            await update.message.reply_text(T[lang]['watch_exists'].format(target=text), reply_markup=get_back_keyboard(lang))
         set_state(user_id, None)
         return
     
@@ -406,11 +414,12 @@ async def button_callback(update, context):
     if data.startswith("lang_"):
         new_lang = data.split("_")[1]
         set_lang(user_id, new_lang)
-        await query.edit_message_text(
-            T[new_lang]['welcome'],
-            parse_mode="Markdown",
-            reply_markup=get_menu_keyboard(new_lang)
-        )
+        await query.edit_message_text(T[new_lang]['welcome'], parse_mode="Markdown", reply_markup=get_menu_keyboard(new_lang))
+        return
+    
+    if data == "menu_back":
+        set_state(user_id, None)
+        await query.edit_message_text(T[lang]['welcome'], parse_mode="Markdown", reply_markup=get_menu_keyboard(lang))
         return
     
     if data == "menu_check":
@@ -426,20 +435,20 @@ async def button_callback(update, context):
     if data == "menu_mywatch":
         items = get_watchlist(user_id)
         if not items:
-            await query.edit_message_text(T[lang]['watch_empty'])
+            await query.edit_message_text(T[lang]['watch_empty'], reply_markup=get_back_keyboard(lang))
         else:
             text_items = "\n".join(f"• `{item}`" for item in items)
-            await query.edit_message_text(T[lang]['watch_list'].format(items=text_items), parse_mode="Markdown")
+            await query.edit_message_text(T[lang]['watch_list'].format(items=text_items), parse_mode="Markdown", reply_markup=get_back_keyboard(lang))
         return
     
     if data == "menu_help":
-        await query.edit_message_text(T[lang]['help'], parse_mode="Markdown")
+        await query.edit_message_text(T[lang]['help'], parse_mode="Markdown", reply_markup=get_back_keyboard(lang))
         return
     
     if data.startswith("report_"):
         target = data.split("_", 1)[1]
         context.user_data['report_target'] = target
-        await query.message.reply_text(T[lang]['report_prompt'])
+        await query.message.reply_text(T[lang]['report_prompt'], reply_markup=get_back_keyboard(lang))
         return
 
 async def notify_watchers(context):
@@ -470,5 +479,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.job_queue.run_repeating(notify_watchers, interval=3600, first=60)
-    print("🛡️ KaaRada Lite started with menu.")
+    print("🛡️ KaaRada Lite started with menu and back button.")
     app.run_polling()
