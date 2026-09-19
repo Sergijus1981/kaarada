@@ -14,7 +14,6 @@ def db_path():
 def init_db():
     conn = sqlite3.connect(db_path())
     c = conn.cursor()
-    # Пользователи
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         first_seen TEXT,
@@ -22,7 +21,6 @@ def init_db():
         language TEXT DEFAULT "en",
         total_checks INTEGER DEFAULT 0
     )''')
-    # База сигналов (жалобы, репутация)
     c.execute('''CREATE TABLE IF NOT EXISTS signals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         target TEXT,
@@ -33,7 +31,6 @@ def init_db():
         added_by INTEGER,
         created_at TEXT
     )''')
-    # Лог проверок
     c.execute('''CREATE TABLE IF NOT EXISTS checks_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
@@ -104,19 +101,14 @@ def get_stats():
 
 # ========== ЛОГИКА ПРОВЕРКИ ==========
 def detect_target_type(text):
-    """Определяет тип: телефон, Till, бизнес"""
     text = text.strip()
-    # Телефон: +254..., 07..., 01...
     if re.match(r'^\+?[0-9]{9,15}$', text):
         return "phone"
-    # Till/Paybill: 5-7 цифр
     if re.match(r'^[0-9]{5,7}$', text):
         return "till"
-    # Иначе — бизнес
     return "business"
 
 def check_target(target, target_type, user_id, lang):
-    """Проверяет цель и возвращает вердикт"""
     signals = get_signals(target)
     
     if not signals:
@@ -129,8 +121,8 @@ def check_target(target, target_type, user_id, lang):
         log_check(user_id, target, target_type, "green")
         return verdict, summary, 0
     
-    # Считаем риск
     risk_score = 0
+    has_verified_source = False
     for risk_level, comment, source, created_at in signals:
         if risk_level == "high":
             risk_score += 3
@@ -138,8 +130,14 @@ def check_target(target, target_type, user_id, lang):
             risk_score += 2
         else:
             risk_score += 1
+        if source and "eConfirm" in source:
+            has_verified_source = True
     
-    if risk_score >= 5:
+    if has_verified_source and risk_score >= 3:
+        verdict = "🔴 High risk"
+        if lang == "sw":
+            verdict = "🔴 Hatari kubwa"
+    elif risk_score >= 5:
         verdict = "🔴 High risk"
         if lang == "sw":
             verdict = "🔴 Hatari kubwa"
@@ -229,7 +227,6 @@ async def stats_command(update, context):
 
 async def addsignal_command(update, context):
     user_id = update.effective_user.id
-    # Только для владельца
     OWNER_ID = int(os.getenv("KAARADA_OWNER_ID", "8743362338"))
     if user_id != OWNER_ID:
         await update.message.reply_text("⛔ Not authorized.")
@@ -251,7 +248,6 @@ async def handle_message(update, context):
     lang = get_lang(user_id)
     text = update.message.text.strip()
     
-    # Проверяем, не отчёт ли это (формат: target | comment)
     if "|" in text and len(text.split("|")) == 2:
         parts = text.split("|")
         target = parts[0].strip()
@@ -260,7 +256,6 @@ async def handle_message(update, context):
         await update.message.reply_text(T[lang]['report_saved'])
         return
     
-    # Иначе — проверка
     target_type = detect_target_type(text)
     await update.message.reply_text(T[lang]['checking'])
     
