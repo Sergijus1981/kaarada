@@ -329,7 +329,7 @@ async def watch_command(update, context):
     register_user(user_id)
     lang = get_lang(user_id)
     if not context.args:
-        await update.message.reply_text(T[lang]['watch_usage'])
+        await update.message.reply_text(T[lang]['watch_usage'], reply_markup=get_back_keyboard(lang))
         return
     target = context.args[0].strip()
     if add_to_watchlist(user_id, target):
@@ -353,7 +353,7 @@ async def unwatch_command(update, context):
     register_user(user_id)
     lang = get_lang(user_id)
     if not context.args:
-        await update.message.reply_text(T[lang]['unwatch_usage'])
+        await update.message.reply_text(T[lang]['unwatch_usage'], reply_markup=get_back_keyboard(lang))
         return
     target = context.args[0].strip()
     remove_from_watchlist(user_id, target)
@@ -424,12 +424,12 @@ async def button_callback(update, context):
     
     if data == "menu_check":
         set_state(user_id, "waiting_for_check")
-        await query.edit_message_text(T[lang]['ask_target'])
+        await query.edit_message_text(T[lang]['ask_target'], reply_markup=get_back_keyboard(lang))
         return
     
     if data == "menu_watch":
         set_state(user_id, "waiting_for_watch")
-        await query.edit_message_text(T[lang]['ask_watch'])
+        await query.edit_message_text(T[lang]['ask_watch'], reply_markup=get_back_keyboard(lang))
         return
     
     if data == "menu_mywatch":
@@ -479,5 +479,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.job_queue.run_repeating(notify_watchers, interval=3600, first=60)
-    print("🛡️ KaaRada Lite started with menu and back button.")
+    print("🛡️ KaaRada Lite started with menu and back button everywhere.")
     app.run_polling()
