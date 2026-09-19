@@ -6,6 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, filters, CallbackQueryHandler, CommandHandler
 
 TOKEN = os.getenv("KAARADA_BOT_TOKEN")
+OWNER_ID = int(os.getenv("KAARADA_OWNER_ID", "8743362338"))
 
 # ========== БАЗА ДАННЫХ ==========
 def db_path():
@@ -38,6 +39,15 @@ def init_db():
         target_type TEXT,
         verdict TEXT,
         created_at TEXT
+    )''')
+    # Watchlist — кто за кем следит
+    c.execute('''CREATE TABLE IF NOT EXISTS watchlist (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        target TEXT,
+        added_at TEXT,
+        last_notified_at TEXT,
+        UNIQUE(user_id, target)
     )''')
     conn.commit()
     conn.close()
@@ -98,6 +108,48 @@ def get_stats():
     total_signals = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
     conn.close()
     return total_users, total_checks, total_signals
+
+# ========== WATCHLIST ==========
+def add_to_watchlist(user_id, target):
+    conn = sqlite3.connect(db_path())
+    try:
+        conn.execute(
+            "INSERT INTO watchlist (user_id, target, added_at) VALUES (?, ?, ?)",
+            (user_id, target, dt.datetime.now().isoformat())
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False
+
+def remove_from_watchlist(user_id, target):
+    conn = sqlite3.connect(db_path())
+    conn.execute("DELETE FROM watchlist WHERE user_id = ? AND target = ?", (user_id, target))
+    conn.commit()
+    conn.close()
+
+def get_watchlist(user_id):
+    conn = sqlite3.connect(db_path())
+    rows = conn.execute("SELECT target FROM watchlist WHERE user_id = ? ORDER BY added_at DESC", (user_id,)).fetchall()
+    conn.close()
+    return [r[0] for r in rows]
+
+def get_all_watchers(target):
+    conn = sqlite3.connect(db_path())
+    rows = conn.execute("SELECT user_id FROM watchlist WHERE target = ?", (target,)).fetchall()
+    conn.close()
+    return [r[0] for r in rows]
+
+def update_notified(user_id, target):
+    conn = sqlite3.connect(db_path())
+    conn.execute(
+        "UPDATE watchlist SET last_notified_at = ? WHERE user_id = ? AND target = ?",
+        (dt.datetime.now().isoformat(), user_id, target)
+    )
+    conn.commit()
+    conn.close()
 
 # ========== ЛОГИКА ПРОВЕРКИ ==========
 def detect_target_type(text):
@@ -169,14 +221,22 @@ T = {
         "verdict": "📊 *Verdict:*",
         "summary": "📋 *Details:*",
         "no_reports": "No reports found.",
-        "help": "Send me a phone number, Till number, or business name to check.",
+        "help": "Send me a phone number, Till number, or business name to check.\n\nCommands:\n/watch <number> — add to your watchlist\n/mywatch — show your watchlist\n/unwatch <number> — remove from watchlist",
         "stats": "📊 *KaaRada Lite Stats*\n\n👥 Users: {users}\n🔍 Total checks: {checks}\n⚠️ Signals: {signals}",
         "unauthorized": "⛔ Not authorized.",
         "add_signal_usage": "Usage:\n/addsignal <target> <type> <risk> <comment>\n\nTypes: phone, till, business\nRisk: low, medium, high",
         "add_signal_success": "✅ Signal added for {target}.",
         "report_button": "⚠️ Report this",
         "report_prompt": "Send me a report in this format:\n\n<target> | <comment>\n\nExample:\n0712345678 | Asked for payment upfront, never delivered.",
-        "report_saved": "✅ Thank you! Your report is saved."
+        "report_saved": "✅ Thank you! Your report is saved.",
+        "watch_added": "👁 Added to your watchlist: {target}\n\nWe'll notify you if new reports appear.",
+        "watch_exists": "👁 Already in your watchlist: {target}",
+        "watch_removed": "✅ Removed from watchlist: {target}",
+        "watch_empty": "👁 Your watchlist is empty.\n\nAdd numbers with:\n/watch <number>",
+        "watch_list": "👁 *Your watchlist:*\n\n{items}\n\nUse /unwatch <number> to remove.",
+        "watch_usage": "Usage: /watch <number>",
+        "unwatch_usage": "Usage: /unwatch <number>",
+        "watch_notify": "🔔 *New report on a number you watch:*\n\n{target}\n\n{details}"
     },
     "sw": {
         "welcome": "🛡️ *KaaRada Lite*\n\nKabla ya kutuma pesa — angalia kwanza.\n\nNitume:\n• Namba ya simu\n• Namba ya Till\n• Jina la biashara\n\nNitakagua na kukupa uamuzi.",
@@ -186,14 +246,22 @@ T = {
         "verdict": "📊 *Uamuzi:*",
         "summary": "📋 *Maelezo:*",
         "no_reports": "Hakuna ripoti zilizopatikana.",
-        "help": "Nitume namba ya simu, namba ya Till, au jina la biashara ili kukagua.",
+        "help": "Nitume namba ya simu, namba ya Till, au jina la biashara ili kukagua.\n\nAmri:\n/watch <namba> — ongeza kwenye orodha yako\n/mywatch — onyesha orodha yako\n/unwatch <namba> — ondoa kwenye orodha",
         "stats": "📊 *Takwimu za KaaRada Lite*\n\n👥 Watumiaji: {users}\n🔍 Jumla ya ukaguzi: {checks}\n⚠️ Ishara: {signals}",
         "unauthorized": "⛔ Hauruhusiwi.",
         "add_signal_usage": "Matumizi:\n/addsignal <lengo> <aina> <hatari> <maoni>\n\nAina: phone, till, business\nHatari: low, medium, high",
         "add_signal_success": "✅ Ishara imeongezwa kwa {target}.",
         "report_button": "⚠️ Ripoti hii",
         "report_prompt": "Nitume ripoti kwa muundo huu:\n\n<lengo> | <maoni>\n\nMfano:\n0712345678 | Alidai malipo mapema, hakutoa bidhaa.",
-        "report_saved": "✅ Asante! Ripoti yako imehifadhiwa."
+        "report_saved": "✅ Asante! Ripoti yako imehifadhiwa.",
+        "watch_added": "👁 Imeongezwa kwenye orodha yako: {target}\n\nTutakujulisha ikiwa ripoti mpya zitaonekana.",
+        "watch_exists": "👁 Tayari iko kwenye orodha yako: {target}",
+        "watch_removed": "✅ Imeondolewa kwenye orodha: {target}",
+        "watch_empty": "👁 Orodha yako ni tupu.\n\nOngeza namba kwa:\n/watch <namba>",
+        "watch_list": "👁 *Orodha yako:*\n\n{items}\n\nTumia /unwatch <namba> kuondoa.",
+        "watch_usage": "Matumizi: /watch <namba>",
+        "unwatch_usage": "Matumizi: /unwatch <namba>",
+        "watch_notify": "🔔 *Ripoti mpya kwenye namba unayofuatilia:*\n\n{target}\n\n{details}"
     }
 }
 
@@ -227,7 +295,6 @@ async def stats_command(update, context):
 
 async def addsignal_command(update, context):
     user_id = update.effective_user.id
-    OWNER_ID = int(os.getenv("KAARADA_OWNER_ID", "8743362338"))
     if user_id != OWNER_ID:
         await update.message.reply_text("⛔ Not authorized.")
         return
@@ -241,6 +308,43 @@ async def addsignal_command(update, context):
     comment = " ".join(args[3:])
     add_signal(target, target_type, risk_level, comment, "admin", user_id)
     await update.message.reply_text(T["en"]['add_signal_success'].format(target=target))
+
+async def watch_command(update, context):
+    user_id = update.effective_user.id
+    register_user(user_id)
+    lang = get_lang(user_id)
+    args = context.args
+    if not args:
+        await update.message.reply_text(T[lang]['watch_usage'])
+        return
+    target = args[0].strip()
+    if add_to_watchlist(user_id, target):
+        await update.message.reply_text(T[lang]['watch_added'].format(target=target))
+    else:
+        await update.message.reply_text(T[lang]['watch_exists'].format(target=target))
+
+async def mywatch_command(update, context):
+    user_id = update.effective_user.id
+    register_user(user_id)
+    lang = get_lang(user_id)
+    items = get_watchlist(user_id)
+    if not items:
+        await update.message.reply_text(T[lang]['watch_empty'])
+        return
+    text_items = "\n".join(f"• `{item}`" for item in items)
+    await update.message.reply_text(T[lang]['watch_list'].format(items=text_items), parse_mode="Markdown")
+
+async def unwatch_command(update, context):
+    user_id = update.effective_user.id
+    register_user(user_id)
+    lang = get_lang(user_id)
+    args = context.args
+    if not args:
+        await update.message.reply_text(T[lang]['unwatch_usage'])
+        return
+    target = args[0].strip()
+    remove_from_watchlist(user_id, target)
+    await update.message.reply_text(T[lang]['watch_removed'].format(target=target))
 
 async def handle_message(update, context):
     user_id = update.effective_user.id
@@ -289,6 +393,34 @@ async def button_callback(update, context):
         await query.message.reply_text(T[lang]['report_prompt'])
         return
 
+# ========== ФОНОВАЯ ЗАДАЧА: УВЕДОМЛЕНИЯ ==========
+async def notify_watchers(context):
+    """Проверяет новые сигналы и уведомляет тех, кто следит за номерами"""
+    conn = sqlite3.connect(db_path())
+    # Находим сигналы, добавленные за последние 24 часа
+    since = (dt.datetime.now() - dt.timedelta(hours=24)).isoformat()
+    rows = conn.execute(
+        "SELECT target, risk_level, comment, source FROM signals WHERE created_at >= ?",
+        (since,)
+    ).fetchall()
+    conn.close()
+    
+    for target, risk_level, comment, source in rows:
+        watchers = get_all_watchers(target)
+        for uid in watchers:
+            lang = get_lang(uid)
+            details = f"[{risk_level.upper()}] {comment}\nSource: {source}"
+            try:
+                await context.bot.send_message(
+                    chat_id=uid,
+                    text=T[lang]['watch_notify'].format(target=target, details=details),
+                    parse_mode="Markdown"
+                )
+                update_notified(uid, target)
+            except Exception as e:
+                print(f"⚠️ Не удалось уведомить {uid}: {e}")
+
+# ========== ЗАПУСК ==========
 if __name__ == "__main__":
     init_db()
     app = Application.builder().token(TOKEN).build()
@@ -296,7 +428,15 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("addsignal", addsignal_command))
+    app.add_handler(CommandHandler("watch", watch_command))
+    app.add_handler(CommandHandler("mywatch", mywatch_command))
+    app.add_handler(CommandHandler("unwatch", unwatch_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
-    print("🛡️ KaaRada Lite started.")
+    
+    # Фоновая задача: каждый час проверяет новые сигналы
+    job_queue = app.job_queue
+    job_queue.run_repeating(notify_watchers, interval=3600, first=60)
+    
+    print("🛡️ KaaRada Lite started with watchlist.")
     app.run_polling()
